@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# PlatformIO
+.pio/
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Claude Code (local-only assistant state)
+.claude/
+CLAUDE.md
+*.original.md
+
