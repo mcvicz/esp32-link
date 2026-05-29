@@ -1,0 +1,3 @@
+@startuml
+' Class diagram: firmware components (Wi-Fi AP, WebSocket server, telemetry sampler, command handler).
+@enduml

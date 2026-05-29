@@ -1,0 +1,3 @@
+@startuml
+' State diagram: ConnectionState FSM (Disconnected, Connecting, Connected, Reconnecting, Error).
+@enduml

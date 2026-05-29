@@ -1,0 +1,3 @@
+@startuml
+' Class diagram: desktop-app layers (ui, application, domain, infrastructure) and the six featured patterns.
+@enduml

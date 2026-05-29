@@ -1,0 +1,3 @@
+@startuml
+' Use-case diagram: actors (user, ESP32) and the desktop-app use cases (connect, view telemetry, toggle LED).
+@enduml

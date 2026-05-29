@@ -1,0 +1,3 @@
+@startuml
+' Sequence diagram: ESP32 streaming 2 Hz telemetry frames through transport, codec, client, into the chart.
+@enduml

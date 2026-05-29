@@ -1,0 +1,3 @@
+@startuml
+' Sequence diagram: desktop app connecting to the ESP32 WebSocket server and the resulting FSM transitions.
+@enduml
