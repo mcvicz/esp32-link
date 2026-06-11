@@ -76,11 +76,13 @@ viewer. To build a single PDF from the markdown set, run `docs/build.sh`
 
 ## Known limitations / things I learned the hard way
 
-- The ESP32's internal temperature sensor is wildly uncalibrated. On my board it
-  reports about −3 °C while the die is around 40 °C. The wire protocol carries
-  the raw value verbatim; the chart still shows the *trend* (warming up under
-  load), which is what matters for the demo. See `docs/04-protocol.md` if you
-  care about the gory details.
+- The first version of the firmware applied a Fahrenheit→Celsius conversion
+  on `temperatureRead()` based on the Arduino-ESP32 major version. That was
+  correct for older 2.x releases but wrong for 2.0.14+, which already returns
+  Celsius. Symptom: chart showed −3 °C at room temperature. Fixed by dropping
+  the conversion. On my board the sensor now reads ~24 °C in a 22–23 °C room.
+  Per-chip variance is a couple of degrees either way. See
+  `docs/04-protocol.md` for the gory details.
 - WSL2's mirrored networking mode doesn't always pick up the Wi-Fi adapter on
   the first try. If `ping 192.168.4.1` from inside WSL says "Network is
   unreachable" while it works from Windows directly, the laptop is on the ESP

@@ -49,14 +49,21 @@ Pushed by the firmware every 500 ms.
 
 The firmware skips telemetry broadcasts when no clients are connected, so the desktop never sees frames it didn't ask for.
 
-#### Sensor calibration caveat
+#### Sensor accuracy note
 
-The ESP32's internal temperature sensor is uncalibrated. Reported `temp_c` values can be off by ±20 °C from the actual chip temperature, with significant unit-to-unit variation. In our test board the sensor reports about −3 °C while the actual die temperature is roughly 40 °C. The wire protocol still carries the value verbatim because:
+The ESP32's internal temperature sensor on the classic ESP32 family is roughly
+within ±1–2 °C of ambient on a given chip and drifts slowly with self-heating.
+Earlier versions of this firmware applied a Fahrenheit-to-Celsius conversion
+based on `ESP_ARDUINO_VERSION_MAJOR`, but Arduino-ESP32 2.0.14 and newer return
+Celsius directly on the classic ESP32 — the extra conversion produced nonsense
+negative values until that was fixed.
 
-- The deviation is consistent per board, so the *trend* (warming up, cooling down) is meaningful even though the absolute value is not.
-- We do not want to bake an arbitrary correction into the firmware.
-
-If accurate temperature is required, calibrate against a known reference and apply the offset in the desktop application or document the per-board offset.
+On my test board the sensor reads about 24 °C at idle in a 22–23 °C room, which
+is fine for the demo. Per-chip variance can shift the absolute value a few
+degrees in either direction without a calibration step; the *trend* (warming up
+under load, cooling when idle) is always reliable. If you need ±0.5 °C absolute
+accuracy, add an external sensor (DS18B20, BMP280, etc.) — that's a hardware
+change, not a firmware tweak.
 
 ### `ack` — ESP32 → desktop
 
