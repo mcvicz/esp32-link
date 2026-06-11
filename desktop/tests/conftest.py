@@ -1,13 +1,19 @@
 """Shared pytest fixtures, including the ``fake_ws_server`` integration-test fixture."""
 
-import asyncio
-import socket
-import threading
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import closing
-from dataclasses import dataclass, field
+import os
 
-import pytest
+# Force Qt's offscreen platform plugin before pytest-qt initialises so tests
+# run without a display (CI, headless WSL).
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import asyncio  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+from collections.abc import Awaitable, Callable, Iterator  # noqa: E402
+from contextlib import closing  # noqa: E402
+from dataclasses import dataclass, field  # noqa: E402
+
+import pytest  # noqa: E402
 import websockets
 
 WsConnectHandler = Callable[[object], Awaitable[None]]
