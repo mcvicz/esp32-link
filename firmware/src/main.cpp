@@ -26,12 +26,10 @@ struct Telemetry {
         Telemetry t;
         t.ts = millis();
 
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
+        // Arduino-ESP32 2.0.14+ returns Celsius on classic ESP32; we no longer
+        // apply the historical Fahrenheit-to-Celsius conversion that older 2.x
+        // releases needed. (Verified against framework-arduinoespressif32 2.0.17.)
         t.temp_c = temperatureRead();
-#else
-        float raw = temperatureRead();
-        t.temp_c = (raw - 32.0f) * 5.0f / 9.0f;
-#endif
 
         t.free_heap = ESP.getFreeHeap();
 
