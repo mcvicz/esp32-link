@@ -26,7 +26,13 @@ _TRANSITIONS: dict[ConnectionState, frozenset[ConnectionState]] = {
     ConnectionState.RECONNECTING: frozenset(
         {ConnectionState.CONNECTED, ConnectionState.ERROR, ConnectionState.DISCONNECTED}
     ),
-    ConnectionState.ERROR: frozenset({ConnectionState.DISCONNECTED, ConnectionState.CONNECTING}),
+    ConnectionState.ERROR: frozenset(
+        {
+            ConnectionState.DISCONNECTED,
+            ConnectionState.CONNECTING,
+            ConnectionState.RECONNECTING,
+        }
+    ),
 }
 
 
