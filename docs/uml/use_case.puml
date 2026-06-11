@@ -1,3 +1,34 @@
 @startuml
-' Use-case diagram: actors (user, ESP32) and the desktop-app use cases (connect, view telemetry, toggle LED).
+title esp32-link — use cases
+
+left to right direction
+
+actor "Desktop user" as user
+actor "ESP32 board" as esp <<device>>
+
+rectangle "esp32-link desktop app" {
+  usecase "Connect to ESP32" as UC_Connect
+  usecase "Disconnect" as UC_Disconnect
+  usecase "View live telemetry" as UC_Telemetry
+  usecase "Toggle onboard LED" as UC_Led
+  usecase "Send ping" as UC_Ping
+  usecase "Automatic reconnect after drop" as UC_Reconnect
+  usecase "Persist last URL and window geometry" as UC_Persist
+}
+
+user --> UC_Connect
+user --> UC_Disconnect
+user --> UC_Telemetry
+user --> UC_Led
+user --> UC_Ping
+
+UC_Connect ..> UC_Reconnect : <<extends>>
+UC_Connect ..> UC_Telemetry : <<includes>>
+
+esp <-- UC_Telemetry : pushes frames
+esp <-- UC_Led : runs command
+esp <-- UC_Ping : runs command
+
+UC_Disconnect ..> UC_Persist : <<includes>>
+
 @enduml

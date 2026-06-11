@@ -1,3 +1,67 @@
 @startuml
-' Class diagram: firmware components (Wi-Fi AP, WebSocket server, telemetry sampler, command handler).
+title esp32-link firmware — logical components (main.cpp)
+
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+package "cfg" <<namespace>> {
+  class constants {
+    + SSID = "ESP32-Console"
+    + PASSWORD = "esp32pass"
+    + WS_PORT = 81
+    + WS_PATH = "/ws"
+    + TELEMETRY_INTERVAL_MS = 500
+    + LED_PIN = 2
+  }
+}
+
+class Telemetry <<struct>> {
+  + ts : uint32_t
+  + temp_c : float
+  + free_heap : uint32_t
+  + rssi : int
+  + {static} sample() : Telemetry
+}
+
+package "Protocol" <<namespace>> {
+  class encoders <<utility>> {
+    + encodeTelemetry(t) : String
+    + encodeAck(cmd_id, ok, msg) : String
+  }
+}
+
+package "CommandDispatcher" <<namespace>> {
+  class dispatcher <<utility>> {
+    + dispatch(payload) : String
+    -- state --
+    - ledState : bool
+  }
+}
+
+class WsServer {
+  - server : AsyncWebServer
+  - ws : AsyncWebSocket
+  - handler : MessageHandler
+  + begin()
+  + broadcast(text)
+  + clientCount() : size_t
+  + onMessage(handler)
+}
+
+class "Arduino setup() / loop()" as core <<entry>> {
+  setup()
+  loop()
+}
+
+core --> WsServer : owns
+core --> Telemetry : samples
+core --> Protocol::encoders : encodes
+WsServer --> CommandDispatcher::dispatcher : delegates inbound frames
+
+note bottom of WsServer
+  Wraps ESPAsyncWebServer / AsyncWebSocket.
+  loop() runs a non-blocking 500 ms tick
+  via millis(); skipped when clientCount()==0.
+end note
+
 @enduml

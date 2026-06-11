@@ -1,3 +1,27 @@
 @startuml
-' Deployment diagram: GNU/Linux host running the desktop app and the ESP32-WROOM node connected over Wi-Fi.
+title esp32-link — deployment
+
+node "GNU/Linux host\n(Python 3.12, PySide6, Qt 6)" as host {
+  artifact "esp32-link\n(uv-managed venv)" as app
+  component "WebSocket client\n(`websockets`)" as wsc
+  app --> wsc
+}
+
+node "ESP32-WROOM-32\n(Arduino-ESP32)" as esp {
+  component "firmware.elf\n(main.cpp)" as fw
+  component "ESPAsyncWebServer + AsyncTCP" as wss
+  fw --> wss
+}
+
+cloud "Wi-Fi soft AP\nSSID: ESP32-Console\nWPA2: esp32pass\n2.4 GHz" as ap
+
+host -down-> ap : station\n192.168.4.2
+esp -up-> ap : AP\n192.168.4.1
+
+note bottom of esp
+  Telemetry: 2 Hz push
+  Commands: on demand
+  Transport: ws://192.168.4.1:81/ws
+end note
+
 @enduml

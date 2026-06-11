@@ -1,3 +1,43 @@
 @startuml
-' Sequence diagram: ESP32 streaming 2 Hz telemetry frames through transport, codec, client, into the chart.
+title esp32-link — telemetry frame and command/ack round-trip
+
+participant "ESP32 firmware\n(loop / Protocol)" as Fw
+participant "WsServer\n(AsyncWebSocket)" as WsFw
+participant "WebSocketTransport" as Tr
+participant "Esp32Client\n(Facade, Observer)" as Client
+participant "codec.decode" as Dec
+participant "ChartWidget" as Chart
+participant "User" as U
+
+== telemetry tick (every 500 ms) ==
+
+Fw -> Fw : millis() - last >= 500?
+Fw -> Fw : Telemetry::sample()
+Fw -> Fw : Protocol::encodeTelemetry(t)
+Fw -> WsFw : broadcast(text)
+WsFw -> Tr : WebSocket text frame
+Tr -> Client : yield text (async for)
+Client -> Dec : decode(line)
+Dec --> Client : Telemetry
+Client --> Chart : telemetry_received(Telemetry)
+Chart -> Chart : append_sample, trim 60 s window
+
+== user clicks "Toggle LED" ==
+
+U -> "ControlPanel" as CP : click
+CP --> Client : toggle_led_requested
+Client -> Client : send(ToggleLedCommand())
+Client -> Client : codec.encode({type:"cmd",cmd_id,action:"toggle_led"})
+Client -> Tr : send(text)
+Tr -> WsFw : WebSocket text frame
+WsFw -> Fw : onMessage(payload)
+Fw -> Fw : CommandDispatcher::dispatch
+Fw -> Fw : digitalWrite(LED_PIN, !ledState)
+Fw -> WsFw : ack frame
+WsFw -> Tr : text frame
+Tr -> Client : yield text
+Client -> Dec : decode(line)
+Dec --> Client : Ack
+Client --> CP : ack_received(Ack)
+
 @enduml

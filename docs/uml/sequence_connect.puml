@@ -1,3 +1,40 @@
 @startuml
-' Sequence diagram: desktop app connecting to the ESP32 WebSocket server and the resulting FSM transitions.
+title esp32-link — connect sequence (happy path)
+
+actor User
+participant "ControlPanel" as CP
+participant "MainWindow" as MW
+participant "Esp32Client\n(Facade)" as Client
+participant "ConnectionStateMachine\n(State)" as FSM
+participant "WebSocketTransport\n(Strategy)" as Tr
+participant "ESP32 firmware\nWsServer" as Esp
+
+User -> CP : click "Connect"
+CP -> CP : on_connect_clicked()
+CP -> MW : connect_requested(url)
+MW -> Client : connect(url)
+
+Client -> FSM : transition_to(CONNECTING)
+Client --> MW : state_changed(CONNECTING)
+MW -> CP : on_state_changed(CONNECTING)
+MW -> "StatusBar" as SB : on_state_changed(CONNECTING)
+
+Client -> Tr : connect(url)
+Tr -> Esp : TCP handshake
+Tr -> Esp : WebSocket upgrade
+Esp --> Tr : 101 Switching Protocols
+Tr --> Client : ok
+
+Client -> FSM : transition_to(CONNECTED)
+Client --> MW : state_changed(CONNECTED)
+MW -> CP : on_state_changed(CONNECTED)
+MW -> SB : on_state_changed(CONNECTED)
+
+note over Client
+  Client now enters its
+  receive loop and awaits
+  telemetry/ack frames.
+  See sequence_telemetry.
+end note
+
 @enduml

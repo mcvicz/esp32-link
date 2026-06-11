@@ -1,3 +1,109 @@
 @startuml
-' Class diagram: desktop-app layers (ui, application, domain, infrastructure) and the six featured patterns.
+title esp32-link desktop — class diagram (four layers and six patterns)
+
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+package "ui" <<Rectangle>> {
+  class MainWindow
+  class ChartWidget
+  class ControlPanel {
+    + connect_requested : Signal(str)
+    + disconnect_requested : Signal()
+    + toggle_led_requested : Signal()
+    + ping_requested : Signal()
+  }
+  class ConnectionStatusBar
+}
+
+package "application" <<Rectangle>> {
+  class Esp32Client <<Facade, Observer subject>> {
+    + connect(url)
+    + disconnect()
+    + send(cmd : Command)
+    + state : ConnectionState
+    --
+    + telemetry_received : Signal(Telemetry)
+    + ack_received : Signal(Ack)
+    + state_changed : Signal(ConnectionState)
+    + error_occurred : Signal(str)
+  }
+
+  abstract class Command <<Command>> {
+    + cmd_id : str
+    + {abstract} action() : str
+    + serialize() : dict
+  }
+  class ToggleLedCommand
+  class PingCommand
+  Command <|-- ToggleLedCommand
+  Command <|-- PingCommand
+}
+
+package "domain" <<Rectangle>> {
+  class Telemetry <<Value Object>> {
+    + ts : int
+    + temp_c : float
+    + free_heap : int
+    + rssi : int
+  }
+  class Ack <<Value Object>> {
+    + cmd_id : str
+    + ok : bool
+    + msg : str
+  }
+  enum ConnectionState {
+    DISCONNECTED
+    CONNECTING
+    CONNECTED
+    RECONNECTING
+    ERROR
+  }
+  class ConnectionStateMachine <<State>> {
+    + state : ConnectionState
+    + can_transition_to(target) : bool
+    + transition_to(target)
+  }
+  ConnectionStateMachine --> ConnectionState
+}
+
+package "infrastructure" <<Rectangle>> {
+  abstract class Transport <<Strategy>> {
+    + {abstract} connect(url)
+    + {abstract} disconnect()
+    + {abstract} send(text)
+    + {abstract} messages() : AsyncIterator[str]
+  }
+  class WebSocketTransport
+  Transport <|-- WebSocketTransport
+  class codec <<utility>> {
+    + encode(payload) : str
+    + decode(line) : Telemetry | Ack | None
+  }
+}
+
+class Config <<Singleton>> {
+  + {static} instance() : Config
+  + last_url : str
+  + window_geometry : str?
+  + save()
+}
+
+MainWindow --> ChartWidget
+MainWindow --> ControlPanel
+MainWindow --> ConnectionStatusBar
+MainWindow --> Esp32Client
+MainWindow ..> Config
+
+Esp32Client --> Transport
+Esp32Client --> codec
+Esp32Client --> ConnectionStateMachine
+Esp32Client ..> Telemetry
+Esp32Client ..> Ack
+Esp32Client ..> Command
+
+ControlPanel ..> ConnectionState
+ConnectionStatusBar ..> ConnectionState
+ChartWidget ..> Telemetry
+
 @enduml

@@ -1,3 +1,30 @@
 @startuml
-' State diagram: ConnectionState FSM (Disconnected, Connecting, Connected, Reconnecting, Error).
+title ConnectionState — finite state machine
+
+[*] --> DISCONNECTED
+
+DISCONNECTED --> CONNECTING : user connect
+
+CONNECTING --> CONNECTED : handshake ok
+CONNECTING --> ERROR : handshake fail
+CONNECTING --> DISCONNECTED : user cancel
+
+CONNECTED --> RECONNECTING : peer closed
+CONNECTED --> ERROR : I/O error
+CONNECTED --> DISCONNECTED : user disconnect
+
+RECONNECTING --> CONNECTED : retry ok
+RECONNECTING --> ERROR : retry fail
+RECONNECTING --> DISCONNECTED : user disconnect
+
+ERROR --> CONNECTING : user retry
+ERROR --> RECONNECTING : auto-retry (next backoff tick)
+ERROR --> DISCONNECTED : user disconnect
+
+note right of RECONNECTING
+  Backoff schedule:
+  1 s, 2 s, 4 s, 8 s, then 8 s indefinitely.
+  Interruptible by a user disconnect.
+end note
+
 @enduml
