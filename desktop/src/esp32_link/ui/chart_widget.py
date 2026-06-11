@@ -26,18 +26,21 @@ class ChartWidget(pg.GraphicsLayoutWidget):
         self._heap: deque[float] = deque()
         self._rssi: deque[float] = deque()
 
-        self._temp_plot = self.addPlot(row=0, col=0, title="Temperature (°C)")
+        self._temp_plot = self.addPlot(row=0, col=0, title="Temperature")
         self._temp_curve = self._temp_plot.plot(pen=_TEMP_PEN)
+        self._temp_plot.setLabel("left", "°C")
 
-        self._heap_plot = self.addPlot(row=1, col=0, title="Free heap (bytes)")
+        self._heap_plot = self.addPlot(row=1, col=0, title="Free heap")
         self._heap_curve = self._heap_plot.plot(pen=_HEAP_PEN)
+        self._heap_plot.setLabel("left", "bytes")
 
-        self._rssi_plot = self.addPlot(row=2, col=0, title="RSSI (dBm)")
+        self._rssi_plot = self.addPlot(row=2, col=0, title="RSSI")
         self._rssi_curve = self._rssi_plot.plot(pen=_RSSI_PEN)
+        self._rssi_plot.setLabel("left", "dBm")
 
         for plot in (self._temp_plot, self._heap_plot, self._rssi_plot):
             plot.showGrid(x=True, y=True, alpha=0.3)
-            plot.setLabel("bottom", "t (s)")
+            plot.setLabel("bottom", "time (s)")
 
         self._heap_plot.setXLink(self._temp_plot)
         self._rssi_plot.setXLink(self._temp_plot)
