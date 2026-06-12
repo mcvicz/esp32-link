@@ -68,6 +68,14 @@ Both jobs run on `ubuntu-latest` on every push and every pull request.
 
 ## What is not tested automatically
 
-- The GUI is not driven end-to-end in CI. We have widget smoke tests, but full user-flow tests (click Connect → see chart fill) require a live ESP32 and are performed manually as part of a release check.
-- Firmware behaviour is not run on real hardware in CI. CI only verifies that the C++ compiles; functional verification is done manually with the desktop client against the board.
-- The internal temperature sensor reading is not asserted against a reference (sensor is uncalibrated; see `04-protocol.md`).
+- The GUI is not driven end-to-end in CI. The widget tests cover construction
+  and signal/slot wiring, but the "click Connect, watch the chart fill" flow
+  needs a real ESP32 on the bench; I run that manually before tagging anything.
+- Firmware behaviour is not exercised in CI. CI only confirms the C++ compiles
+  cleanly under PlatformIO with the pinned framework version. The functional
+  side is verified manually against the actual board (`pio device monitor` +
+  the desktop client connected at the same time).
+- The internal temperature sensor reading is not asserted against a reference,
+  because the sensor on the ESP32-WROOM is uncalibrated and reads about 40 °C
+  low on my board (see `04-protocol.md`). Asserting it would just bake in my
+  board's offset.
