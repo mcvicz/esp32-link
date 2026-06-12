@@ -23,3 +23,10 @@ build/
 CLAUDE.md
 *.original.md
 
+# MS Office temporary lock files
+~$*
+*.tmp
+
+# Source DOCX of the project documentation (PDF is the published version)
+*.docx
+
