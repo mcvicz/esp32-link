@@ -1,8 +1,12 @@
 # Connection state machine
 
-The desktop client tracks a single connection through a five-state FSM defined in `domain/state.py`. The FSM owns the current state and validates every transition; `Esp32Client` calls `transition_to(...)` at well-defined points in its `_main()` reconnection loop.
+The desktop client tracks a single connection through a five-state FSM defined
+in `domain/state.py`. The FSM owns the current state and checks every
+transition against a table; `Esp32Client` calls `transition_to(...)` at
+well-defined points in its `_main()` reconnection loop.
 
-The state diagram is rendered in `uml/state_connection.puml`.
+The full diagram is `uml/state_connection.puml`. The companion design notes are
+in [03-design.md § State](03-design.md#3-state--connectionstatemachine).
 
 ## States
 
@@ -45,4 +49,24 @@ The user-visible "Connect/Disconnect" button label is derived from the state in 
 
 ## Why the FSM lives in `domain/`
 
-`ConnectionStateMachine` has no dependency on Qt, asyncio, or `websockets`. That keeps `tests/test_state_machine.py` trivially fast and lets us reason about legal transitions without spinning up an event loop. The reconnection *policy* (when to call the transitions) lives in `Esp32Client` because it does need asyncio; the *rules* about which transitions are legal stay framework-free.
+`ConnectionStateMachine` has no dependency on Qt, asyncio, or `websockets`,
+which is the whole reason it sits in `domain/`. The transition tests
+(`tests/test_state_machine.py`) run in milliseconds — no event loop, no sockets,
+no widgets to instantiate. The reconnection *policy* (when each transition
+fires) lives in `Esp32Client` because that layer is the one that actually owns
+the timer; the *rules* about which transitions are legal stay framework-free.
+
+## Notes on what bit me
+
+I shipped the FSM first with `ERROR` having only two outgoing transitions
+(`{DISCONNECTED, CONNECTING}`), which seemed cleaner — Error is "user must
+acknowledge before retrying". When I ran the GUI against an unreachable host I
+realised the auto-retry loop was hitting `ERROR → RECONNECTING` and getting
+silently dropped, so the status bar stayed red while the client was actually
+retrying behind the scenes. Adding `RECONNECTING` to the outgoing set fixed it.
+The single-commit change is `domain: allow ERROR -> RECONNECTING transition
+during auto-retry`.
+
+Lesson for me: when the GUI seems "stuck" in a state, the FSM transition log at
+DEBUG level (`logger.debug("skipping illegal transition ...")`) is the first
+thing to check.
