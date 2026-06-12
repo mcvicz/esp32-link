@@ -57,34 +57,55 @@ The GUI defaults to `ws://192.168.4.1:81/ws`. Connect the host Wi-Fi to the
 
 ## Runbook (first-time tester / grader)
 
-If you've just cloned this fresh and want the full demo running from zero, this
-is the path I'd take. It assumes Linux (or WSL2 on Windows with WSLg). About
-10 minutes of wall time, most of it spent on PlatformIO downloading the ESP32
-toolchain on first build.
+This walkthrough assumes Windows with WSL2 (Ubuntu) and WSLg — the same setup
+the project was developed against. About 15 minutes of wall time, most of it
+spent on PlatformIO downloading the ESP32 toolchain on first build.
 
-### 1. Install the toolchains
+> **Two terminals.** The firmware lives on the USB-attached ESP32 which only
+> Windows can see, so the firmware steps (build / flash / serial monitor)
+> happen in a **Windows PowerShell**. The desktop app needs a Linux Qt
+> environment, so it runs in a **WSL (Ubuntu) terminal**. Each step below is
+> tagged with which terminal to use.
+
+### 1. Install the toolchains (one-off)
+
+**[Windows PowerShell] — for the firmware:**
+
+```powershell
+# Requires Python on Windows. If you don't have it: https://www.python.org/downloads/
+pip install --user platformio
+```
+
+The installer prints a path like
+`C:\Users\<you>\AppData\Local\Python\pythoncoreXY-64\Scripts` and warns it
+isn't on `PATH`. That's fine — every PlatformIO command in this runbook uses
+the `python -m platformio …` form which doesn't need `PATH`.
+
+**[WSL] — for the desktop app:**
 
 ```bash
-# uv (Python env manager)
+# uv (Python env manager). Adds itself to ~/.local/bin/
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# PlatformIO (for the firmware)
-pip install --user platformio    # or: pipx install platformio
 ```
+
+Modern Ubuntu (24.04+) blocks `pip install` outside a virtualenv. If you
+want PlatformIO inside WSL too (not required — see the note above), use
+`sudo apt install pipx` then `pipx install platformio`.
 
 ### 2. Build and flash the firmware
 
-Plug the ESP32 into a USB port (data cable!). Then:
+**[Windows PowerShell]**, with the ESP32 connected via a **USB-data** cable
+(charge-only cables will not enumerate):
 
-```bash
-cd firmware
-pio device list                  # confirm the board enumerates as COMx / /dev/ttyUSBx
-pio run --target erase           # optional, wipes any old firmware
-pio run --target upload          # builds + flashes; ~5-10 min on first run
-pio device monitor               # 115200 baud, Ctrl+C to quit
+```powershell
+cd C:\Users\<you>\Desktop\…\esp32-link\firmware
+python -m platformio device list           # confirm the board appears as COMx
+python -m platformio run --target erase    # optional, wipes any old firmware
+python -m platformio run --target upload   # builds + flashes; ~5-10 min on first run
+python -m platformio device monitor        # 115200 baud, Ctrl+C to quit
 ```
 
-On the serial monitor you should see, within a second of reset:
+On the serial monitor, within a second of reset:
 
 ```
 [boot] esp32-link firmware booted
@@ -94,9 +115,15 @@ On the serial monitor you should see, within a second of reset:
 
 If those three lines appear, the firmware is healthy.
 
+> **Why not WSL for this step?** WSL2 doesn't see USB devices by default.
+> `pio device list` in WSL will return empty. There is a workaround
+> (`usbipd-win`), but it's extra setup. PlatformIO on Windows is the path of
+> least resistance.
+
 ### 3. Join the ESP32's Wi-Fi
 
-From the host's Wi-Fi settings, connect to:
+From **Windows Wi-Fi settings** (the laptop is the station, the ESP32 is the
+AP):
 
 | SSID | Password |
 |------|----------|
@@ -105,12 +132,17 @@ From the host's Wi-Fi settings, connect to:
 The host gets `192.168.4.2` via DHCP. Windows will say "no internet" — that's
 expected, the ESP32 isn't a router.
 
+Keep the serial monitor from step 2 open in PowerShell if you want to watch
+the `[ws] client #1 connected` line appear later.
+
 ### 4. Run the desktop app
 
+**[WSL]**:
+
 ```bash
-cd desktop
-uv sync                          # one-off, ~2 min, downloads Qt
-uv run esp32-link                # dark window opens via WSLg / X11
+cd /mnt/c/Users/<you>/Desktop/…/esp32-link/desktop
+uv sync                # one-off, ~2 min, downloads Qt
+uv run esp32-link      # dark window opens via WSLg
 ```
 
 Click **Connect**. The status badge should go yellow (Connecting) for under a
