@@ -1,16 +1,35 @@
 # Design patterns
 
-Six design patterns are used. Each section follows the same structure: **Problem → Pattern → Application → Alternatives considered → Trade-offs**.
+This is the main design writeup. Six patterns are used in the project, listed
+below in roughly the order I picked them while building. Each gets a problem
+description, the pattern itself, where it lives in the code, what I tried first
+or considered as an alternative, and the trade-offs I noticed in practice.
+
+Two notes up front:
+
+- I'm aware that hitting six named patterns can feel like a checklist. Honestly,
+  Singleton was the one I argued with myself about the most (see below). Facade,
+  Strategy, State, Command, and Observer fell out of the problem naturally; I
+  did not have to "find a place" for them.
+- The patterns map cleanly onto the layered architecture in
+  [02-architecture.md](02-architecture.md). Facade and Command sit in
+  `application/`, State and the value objects in `domain/`, Strategy in
+  `infrastructure/`, Observer is the Qt signal glue, and Singleton is the
+  `Config` accessor.
 
 ---
 
 ## 1. Facade — `Esp32Client`
 
-**Problem.** The desktop application has to coordinate four moving parts to talk to the ESP32: a transport (WebSocket), a codec (JSON), a state machine (connection state), and a reconnection policy (exponential backoff). Without a deliberate seam, every UI widget that wants telemetry or sends a command would need to know about all four. That couples Qt widgets to asyncio, to `websockets`, and to JSON shapes.
+To talk to the board the application has to juggle four things: a WebSocket
+transport, a JSON codec, a connection state machine, and a reconnection policy.
+The GUI doesn't care about any of these individually — it wants to call
+`connect()`, see telemetry arrive, send a command, and not deal with asyncio.
 
-**Pattern.** *Facade* (GoF structural pattern). Provide a unified, small interface in front of a larger subsystem so client code talks to one object instead of many.
+The Facade pattern fits exactly that: give the GUI one object with a small
+interface that hides the rest of the subsystem.
 
-**Application.** `application/client.py::Esp32Client` exposes a tiny API:
+`application/client.py::Esp32Client` is that object. Its public surface is:
 
 ```python
 client.connect(url: str) -> None
@@ -19,35 +38,40 @@ client.send(command: Command) -> None
 client.state -> ConnectionState
 ```
 
-…plus four Qt signals: `telemetry_received`, `ack_received`, `state_changed`, `error_occurred`.
+…plus four Qt signals (`telemetry_received`, `ack_received`, `state_changed`,
+`error_occurred`). Internally it owns the transport, runs the asyncio loop in a
+background thread, drives the FSM through its lifecycle, and applies the
+exponential backoff on reconnect.
 
-Internally `Esp32Client` owns:
-- a `Transport` (Strategy) for the wire,
-- the `codec.encode`/`codec.decode` helpers,
-- a `ConnectionStateMachine` (State),
-- a background thread driving an asyncio event loop,
-- the reconnection backoff schedule.
+**Alternatives I considered.** The first version of `MainWindow` actually held
+the transport directly and called `await transport.connect(...)` inline. That
+worked but mixed Qt event-loop code with asyncio code in the same file, and
+every widget that needed to send a command was importing `websockets`. The
+Facade gave me a single place to bridge asyncio to Qt (the worker thread plus
+queued signal emissions) and a single point to add reconnection later.
 
-The UI never imports `websockets`, never imports `asyncio`, never builds a JSON string.
+I also looked at the Mediator pattern but rejected it — there is no widget-to-
+widget coordination here, only widgets-to-connection. Facade is the right size.
 
-**Alternatives considered.**
-- *No facade*: every widget would import the transport, codec, and FSM directly. Tight coupling; refactoring any of the four would touch UI code.
-- *A separate Mediator object* that brokered messages between widgets and infrastructure. Heavier; we don't need bidirectional widget-to-widget coordination.
-- *Service locator / dependency injection container.* Overkill for a single application object.
-
-**Trade-offs.**
-- The Facade is a single class with multiple responsibilities; it's bigger than a leaf component. We accept that because everything it coordinates is genuinely one cohesive concern: "the connection to the board".
-- Hiding asyncio means we have to bridge to Qt explicitly (background thread + queued signal emissions). That bridge is encapsulated *inside* the Facade — exactly what the pattern is for.
+**Trade-offs.** `Esp32Client` is genuinely a "god object" if you squint —
+transport ownership, codec, FSM driver, retry loop, signal emitter, all in one
+class (~200 lines). I think that's fine because all of those concerns are about
+*the connection* and a single class is easier to reason about than five
+collaborating ones for code at this scale. If the project grew, I'd extract the
+retry policy first.
 
 ---
 
 ## 2. Strategy — `Transport`
 
-**Problem.** The connection between desktop and ESP32 currently uses WebSocket over Wi-Fi, but a future variant (serial over USB, or a different protocol stack) is plausible. Hard-coding the `websockets` library throughout `Esp32Client` would lock us in.
+The wire is WebSocket today. It might be a USB serial link tomorrow if I
+finally talk WSL into doing USB passthrough properly. I did not want the rest of
+the code to care.
 
-**Pattern.** *Strategy* (GoF behavioural pattern). Define a family of algorithms, encapsulate each one behind a common interface, and make them interchangeable at runtime.
+Strategy: define an abstract interface for the algorithm (here, "a bidirectional
+text transport"), implement one or more concrete strategies, let callers pick.
 
-**Application.** `infrastructure/transport.py::Transport` is an abstract base class:
+`infrastructure/transport.py::Transport` is the ABC:
 
 ```python
 class Transport(ABC):
@@ -57,58 +81,66 @@ class Transport(ABC):
     @abstractmethod def messages(self) -> AsyncIterator[str]: ...
 ```
 
-`infrastructure/websocket_transport.py::WebSocketTransport` is the only concrete strategy used in production. `Esp32Client.__init__` accepts a `transport: Transport | None` parameter and defaults to `WebSocketTransport()`. Tests inject a fake.
+`infrastructure/websocket_transport.py::WebSocketTransport` is the only concrete
+strategy in production. `Esp32Client.__init__` takes an optional `transport`
+parameter and defaults to a fresh `WebSocketTransport()`. The tests inject a
+fake one when they want to drive the client without touching the network.
 
-**Alternatives considered.**
-- *Direct use of `websockets`* in `Esp32Client`: simpler, but couples the facade to a specific library and makes integration testing harder (you'd need to start a real WebSocket server even for fast tests).
-- *Plain function with library inside*: works, but doesn't capture the lifecycle (connect/disconnect/send/receive) as a coherent object.
-- *Duck-typing without an ABC*: would compile, but the ABC documents the contract and catches missing methods at import time.
+**Alternatives.** I could have imported `websockets` straight into
+`Esp32Client`. It would be five lines shorter. But then the integration tests
+would need a real WebSocket server on a real port (which is what the
+`fake_ws_server` fixture is — but at least it sits behind the same interface as
+production), and a future serial backend would require ripping things up.
 
-**Trade-offs.**
-- One extra layer of indirection for code that today only has one implementation. Justified because the abstraction lets us write the integration tests against a `fake_ws_server` fixture cleanly and would let a `SerialTransport` slot in without touching anything above `infrastructure/`.
-- The abstract `messages()` is an async generator — slightly less obvious than a callback, but composes naturally with `async for` inside the client.
+**Trade-offs.** One extra layer of indirection that today has exactly one
+concrete implementation, so by YAGNI you could argue it's premature. I keep it
+because the abstraction is small (four methods), the win on testability is
+already real, and a serial backend is not hypothetical — it's the obvious next
+step if I keep working on this.
 
 ---
 
 ## 3. State — `ConnectionStateMachine`
 
-**Problem.** The connection has several distinct lifecycle phases: idle, opening, connected, retrying after a drop, and a fatal error. Different code paths must run in each phase (the UI enables/disables buttons, the client decides whether to send or queue, reconnection logic decides whether to back off). Sprinkling `if connected and not error and not reconnecting: ...` boolean checks throughout the codebase produces bug-prone, hard-to-trace logic.
+The connection lifecycle has five distinct phases (Disconnected, Connecting,
+Connected, Reconnecting, Error). Different code in different layers asks "are
+we connected?" or "should we try again?" and earlier versions of this question
+were two boolean flags. That gave me four possible flag combinations for five
+real states, with most combinations meaningless and at least one bug where the
+GUI thought we were both reconnecting and disconnected at the same time.
 
-**Pattern.** *State* (GoF behavioural pattern). Encapsulate the allowed states and the legal transitions between them in a single object. Calling code asks "what state are we in?" and "is this transition legal?" instead of juggling flags.
+State pattern, in the lightweight sense: an enum for the states, a transition
+table for what's allowed, and one method on the FSM that validates a requested
+transition. The full diagram is in `uml/state_connection.puml` and the
+companion writeup is [05-state-machine.md](05-state-machine.md).
 
-**Application.** `domain/state.py` defines:
+The FSM lives in `domain/` and has no Qt or async dependencies. That keeps the
+tests fast and makes the transition rules easy to read in one file. The
+reconnection *policy* (which transitions fire and when) is in `Esp32Client`
+because that's the layer that actually owns the timer.
 
-```python
-class ConnectionState(Enum):
-    DISCONNECTED
-    CONNECTING
-    CONNECTED
-    RECONNECTING
-    ERROR
-```
+**Alternatives.** Boolean flags were the original sin. The classic GoF rendering
+with one class per state (and dispatched methods per state) is overkill here —
+my states have no per-state behaviour beyond "is this transition allowed". A
+table-driven FSM is the right weight.
 
-…and `ConnectionStateMachine` which owns the current state plus a transition table mapping each state to its legal successors. Illegal transitions raise `IllegalTransitionError`. The transition diagram is documented in `05-state-machine.md` and rendered as `uml/state_connection.puml`.
-
-`Esp32Client` delegates all state questions to the FSM (`client.state`) and emits `state_changed` whenever a transition succeeds. The control panel and status bar consume the signal as Observers (see pattern 5 below).
-
-**Alternatives considered.**
-- *Boolean flags* (`is_connected`, `is_reconnecting`): two flags create four states; five real states need three, with most combinations meaningless. Easy to enter contradictory combinations.
-- *Pattern via separate classes per state* (the "classic" GoF rendering): heavier; each transition becomes a polymorphic call. Overkill for five states with no per-state behaviour beyond "is this allowed".
-- *Inline string constants* instead of an enum: loses static checking.
-
-**Trade-offs.**
-- The FSM lives in `domain/`, framework-free, and is therefore reusable and testable in isolation (see `tests/test_state_machine.py`).
-- A pure transition table can't express "auto-progress after N seconds"; reconnection backoff lives in `Esp32Client`, which calls `transition_to(...)` at the right moments. That's by design — the FSM models *which* transitions are legal, not *when* they fire.
+**Trade-offs.** A static transition table can't express "auto-progress after N
+seconds" — but I don't want it to. The FSM models legality, not policy.
 
 ---
 
 ## 4. Command — `ToggleLedCommand`, `PingCommand`
 
-**Problem.** When the user clicks a button, we need to send a JSON message that names an action and carries a unique correlation id (`cmd_id`) so we can match the ack later. Two distinct UI buttons, two distinct payloads. If each button built its own JSON inline, the wire-protocol shape would leak into the UI.
+When the user clicks the LED button, we need to send a JSON message that names
+an action and carries a UUID for the matching ack. Two buttons, two payloads.
 
-**Pattern.** *Command* (GoF behavioural pattern). Encapsulate a request as an object so it can be parameterised, queued, logged, and decoupled from its invoker.
+I went back and forth on whether this was worth a hierarchy. With two commands,
+a pair of `if action == "toggle_led": ...` branches on a string would have done
+the job. I chose the hierarchy mostly so that adding a third command (or a
+command with arguments, like `SetIntervalCommand(ms=250)`) doesn't require
+changing the signature of `Esp32Client.send()`.
 
-**Application.** `application/commands.py` defines an abstract `Command` dataclass with:
+`application/commands.py` has an abstract `Command` dataclass:
 
 ```python
 @dataclass(frozen=True)
@@ -122,60 +154,68 @@ class Command(ABC):
         return {"type": "cmd", "cmd_id": self.cmd_id, "action": self.action()}
 ```
 
-Concrete subclasses are tiny: `ToggleLedCommand` returns `"toggle_led"` from `action()`, `PingCommand` returns `"ping"`. UI code constructs `ToggleLedCommand()` (UUID is generated for free) and hands it to `Esp32Client.send(...)`. The client calls `serialize()` and pipes the dict through the codec.
+`ToggleLedCommand` and `PingCommand` each just override `action()`. The UUID
+default factory means the UI never has to think about correlation ids.
 
-**Alternatives considered.**
-- *Plain function calls* (`client.send_toggle_led()`): works for two actions, scales poorly. Adding a new command means adding a new method on the facade and the UI, instead of one new dataclass.
-- *Raw dictionaries in the UI*: leaks the wire shape; renaming a JSON field would touch every widget.
-- *Enums* (`Action.TOGGLE_LED`): works for parameterless commands. The Command pattern accommodates future commands that carry payloads (e.g. `SetIntervalCommand(ms=250)`) without changing the call site signature.
-
-**Trade-offs.**
-- Adds a small object hierarchy where two `if/elif` branches could have sufficed for now. The hierarchy pays off the moment we add a third command or a command with arguments.
-- `cmd_id` is generated client-side via `uuid.uuid4()`; we don't need a coordination service.
+**Trade-offs.** I could equally have used a string enum (`Action.TOGGLE_LED`)
+and a single `send(action: Action)` method, which would be smaller. The
+hierarchy pays off the first time I add a command that needs arguments — until
+then it is on the heavy side.
 
 ---
 
 ## 5. Observer — Qt signals on `Esp32Client`
 
-**Problem.** Telemetry arrives asynchronously, possibly at 2 Hz. State changes and errors happen at unpredictable times. The chart widget, the control panel, and the status bar all need to react, but `Esp32Client` shouldn't know which widgets exist.
+Telemetry arrives whenever the ESP feels like it (every 500 ms, but unpredictable
+in jitter). State changes happen on connect, drop, retry, etc. Three widgets
+need to react: the chart, the control panel, the status bar. None of them
+should be coupled to one another and `Esp32Client` shouldn't even know they
+exist.
 
-**Pattern.** *Observer* (GoF behavioural pattern). Subjects notify a list of observers when state changes, with observers registering and unregistering dynamically.
+Qt's signals and slots are an Observer implementation hiding in a different
+costume. The subject (`Esp32Client`) declares typed signals. Each observer
+widget connects a slot to the signal it cares about. The dispatch is
+thread-safe by default — emissions from the asyncio worker thread land on the
+GUI thread via Qt's queued connection.
 
-**Application.** `Esp32Client` is a `QObject` that exposes four Qt signals:
+The wiring is centralised in `MainWindow.__init__`:
 
 ```python
-telemetry_received = Signal(Telemetry)
-ack_received       = Signal(Ack)
-state_changed      = Signal(ConnectionState)
-error_occurred     = Signal(str)
+self._client.telemetry_received.connect(self._chart.append_sample)
+self._client.state_changed.connect(self._control_panel.on_state_changed)
+self._client.state_changed.connect(self._status_bar.on_state_changed)
+self._client.error_occurred.connect(self._status_bar.on_error)
 ```
 
-Each widget connects its slot to the signals it cares about:
+Adding a new observer is one line.
 
-- `ChartWidget.append_sample` ← `telemetry_received`
-- `ControlPanel.on_state_changed` ← `state_changed`
-- `ConnectionStatusBar.on_state_changed` ← `state_changed`
-- `ConnectionStatusBar.on_error` ← `error_occurred`
-
-This is the idiomatic Qt rendering of the Observer pattern. Connections are made centrally in `MainWindow.__init__`.
-
-**Alternatives considered.**
-- *Polling*: widgets ask the client "any new telemetry?" on a timer. Wastes cycles and adds latency. Not how Qt is meant to be used.
-- *Hand-rolled callback lists*: PySide6 already provides thread-safe signal/slot infrastructure with queued dispatch across threads. Reinventing it would be strictly worse.
-
-**Trade-offs.**
-- Qt signals are typed (each declares its payload types), but the type hints don't propagate to slots — runtime errors at connection time if signatures mismatch. Mitigated by direct testing of each widget's slot in `tests/test_ui.py`.
-- Signals are best-effort: a slow slot delays the next emission's processing because they share the event loop. Our slots are O(1) (append to a deque, update one label).
+**Trade-offs.** Qt signal/slot type-checking is runtime only — if I declare a
+slot with the wrong signature the binding silently does nothing at emission time
+or PySide6 logs a warning. Mitigated by the widget tests in
+`tests/test_ui.py` that emit each signal and assert the slot ran.
 
 ---
 
 ## 6. Singleton — `Config.instance()`
 
-**Problem.** The application has a small bundle of user-level settings (the last URL entered, the window geometry to restore) that must be readable from anywhere and persisted to a single JSON file on disk. Letting any code construct a new `Config` would lead to multiple in-memory copies that disagree.
+This is the one I argued with myself about. The application has two persisted
+settings: the last URL entered into the URL field and the window geometry. They
+load from `~/.config/esp32-link/config.json` on startup and save in
+`MainWindow.closeEvent`.
 
-**Pattern.** *Singleton* (GoF creational pattern). Ensure a class has only one instance and provide a global access point.
+The textbook objection to Singleton is that it's global state in disguise, and
+global state hurts testability. The reason I kept it anyway:
 
-**Application.** `config.py::Config` is a dataclass with a classmethod accessor:
+- The "load once from disk" lifecycle is real, not pretend. A second instance
+  wouldn't be a logically different config, just a stale copy of the same one.
+- The widget that triggers a save (`MainWindow` on close) and the widget that
+  reads it on construction (also `MainWindow`) are far apart in time and don't
+  share a constructor — passing a `Config` instance through dependency injection
+  would have meant threading it through `app.py → MainWindow.__init__ → ...`.
+  Worth it if there were several pieces of state to manage; not worth it for
+  two strings.
+
+`config.py::Config` is a dataclass with a classmethod:
 
 ```python
 @classmethod
@@ -187,25 +227,36 @@ def instance(cls) -> Self:
     return cls._instance
 ```
 
-First access loads `~/.config/esp32-link/config.json` (or returns defaults). `MainWindow` reads `last_url` to pre-fill the URL field on launch and writes back `window_geometry` and `last_url` in `closeEvent` via `Config.instance().save()`.
+The double-checked locking is mostly habit — the GUI is single-threaded for
+config access, so it doesn't strictly matter, but the explicit lock made me
+feel better about it during the asyncio-thread bridging work.
 
-**Alternatives considered.**
-- *Module-level globals* in `config.py`: equivalent in practice but doesn't model the "loaded-from-disk-once" lifecycle as clearly.
-- *Dependency injection*: passing a `Config` instance through every constructor adds noise for a clearly application-wide piece of state.
-- *Qt's `QSettings`*: would also work and is platform-aware, but ties the persistence layer to Qt, which we've otherwise kept out of `config.py`.
+A `Config.reset()` classmethod exists purely as a test hook to clear the cached
+instance. Tests that monkeypatch `CONFIG_PATH` to a tmpdir call this so they
+don't see each other's state.
 
-**Trade-offs.**
-- Global state is testable but requires care: `Config.reset()` (a test hook) clears the cached instance so tests can monkeypatch `CONFIG_PATH` per test.
-- Singletons can hide dependencies. For a two-field config used at startup and shutdown, the readability win of `Config.instance().last_url` outweighs the cost.
+**Alternatives.** `QSettings` would do the same job and is what an actual Qt
+person would use — it handles per-platform paths cleanly. I went with a plain
+JSON file because the rest of the persistence layer didn't already depend on
+Qt and I didn't want it to.
+
+**Trade-offs.** Global state is global state. For a two-field config used at
+startup and shutdown, the convenience of `Config.instance().last_url` was worth
+the slight smell. If `Config` grew a dozen settings I'd reconsider.
 
 ---
 
 ## Incidental patterns
 
-The following are used freely but not documented as featured patterns:
+A few other patterns are used without being documented as featured ones:
 
-- **Value Object** — `Telemetry` and `Ack` are immutable, slotted, frozen dataclasses with structural equality.
-- **Repository-ish** — `Config` happens to also be the persistence boundary for its own state. We don't formalise it as a separate Repository because the dataset is tiny.
-- **Template Method** — `Command.serialize()` is the common skeleton; subclasses fill in `action()`.
+- **Value Object** — `Telemetry` and `Ack` are immutable frozen dataclasses
+  with `slots=True` and structural equality. Idiomatic Python; not really a
+  "pattern decision" so much as the natural representation for inbound message
+  data.
+- **Template Method** — `Command.serialize()` is the common skeleton, subclasses
+  fill in `action()`. Same shape as the GoF pattern but applied at the smallest
+  possible scope.
 
-These are useful idioms, but the six patterns above are the ones we *document and showcase* because they map cleanly onto the project's structural decisions.
+These are useful idioms but I didn't make them part of the headline six because
+they don't structure the architecture the way the six above do.
