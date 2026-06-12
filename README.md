@@ -61,6 +61,12 @@ This walkthrough assumes Windows with WSL2 (Ubuntu) and WSLg — the same setup
 the project was developed against. About 15 minutes of wall time, most of it
 spent on PlatformIO downloading the ESP32 toolchain on first build.
 
+> **If something breaks at any step, skip to the troubleshooting table in
+> [docs/07-build-and-run.md](docs/07-build-and-run.md#troubleshooting)**
+> before assuming it's the runbook. Every problem I hit while writing this
+> project (PIO not on PATH, WSL can't see Wi-Fi, USB cable issues, GUI shows
+> "timed out", Qt libraries missing, etc.) is listed there with the fix.
+
 > **Two terminals.** The firmware lives on the USB-attached ESP32 which only
 > Windows can see, so the firmware steps (build / flash / serial monitor)
 > happen in a **Windows PowerShell**. The desktop app needs a Linux Qt
