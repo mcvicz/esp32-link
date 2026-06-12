@@ -42,19 +42,35 @@ The desktop application is split into four layers. Dependencies flow downward on
 
 ### Layer responsibilities
 
-**`ui/`** — visual widgets and user input. Knows about `application.Esp32Client` and `domain.ConnectionState`. Never imports `infrastructure` directly. Builds `Command` objects and forwards them to the client.
+**`ui/`**: visual widgets and user input. Knows about `application.Esp32Client`
+and `domain.ConnectionState`. Never imports `infrastructure` directly. Builds
+`Command` objects and hands them to the client.
 
-**`application/`** — orchestrates the use cases. Owns the `Esp32Client` facade that wraps the transport, codec, FSM, and reconnection policy. Owns the `Command` hierarchy that captures user intent.
+**`application/`**: orchestrates the use cases. Owns the `Esp32Client` facade
+that wraps the transport, codec, FSM, and reconnection policy. Owns the
+`Command` hierarchy that captures user intent.
 
-**`domain/`** — framework-free data model. `Telemetry` and `Ack` dataclasses, the `ConnectionState` enum, and the `ConnectionStateMachine`. Imports nothing from Qt or the `websockets` library; can be unit-tested without any GUI or network.
+**`domain/`**: framework-free data model. `Telemetry` and `Ack` dataclasses,
+the `ConnectionState` enum, and the `ConnectionStateMachine`. Imports nothing
+from Qt or the `websockets` library, which is what makes it easy to unit-test
+without spinning up a GUI or a network.
 
-**`infrastructure/`** — adapters to the outside world. The `Transport` abstract base class (Strategy), the concrete `WebSocketTransport`, and the JSON `codec`. Hides all I/O and serialization details from the upper layers.
+**`infrastructure/`**: adapters to the outside world. The `Transport` abstract
+base class (Strategy), the concrete `WebSocketTransport`, and the JSON `codec`.
+Hides all I/O and serialization details from the upper layers.
 
 ### Why the split is enforced
 
-- The `domain` layer remains trivially unit-testable because it has no async, no Qt, and no sockets.
-- The `Transport` abstraction means a future `SerialTransport` could be plugged into `Esp32Client` without touching `domain`, `ui`, or any other infrastructure.
-- The UI doesn't know that telemetry comes from a WebSocket or that messages are JSON. It just connects slots to Qt signals.
+A few concrete payoffs I noticed while writing the code:
+
+- The `domain` layer's tests run in milliseconds. No event loop, no port to
+  bind, no Qt application to instantiate.
+- The `Transport` abstraction means a future `SerialTransport` slots in without
+  touching `domain`, `ui`, or `application`. I have not actually written one,
+  but the abstract base class is shaped to allow it.
+- The UI does not know that telemetry comes over a WebSocket or that messages
+  are JSON. It connects slots to Qt signals and that's it. If we swapped to
+  Protobuf over a serial port tomorrow, `ui/` would not change.
 
 ## Firmware structure
 
