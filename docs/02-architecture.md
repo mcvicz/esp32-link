@@ -69,8 +69,8 @@ A few concrete payoffs I noticed while writing the code:
   touching `domain`, `ui`, or `application`. I have not actually written one,
   but the abstract base class is shaped to allow it.
 - The UI does not know that telemetry comes over a WebSocket or that messages
-  are JSON. It connects slots to Qt signals and that's it. If we swapped to
-  Protobuf over a serial port tomorrow, `ui/` would not change.
+  are JSON. It connects slots to Qt signals and that's it. Swap to Protobuf
+  over a serial port tomorrow and `ui/` would not change.
 
 ## Firmware structure
 
