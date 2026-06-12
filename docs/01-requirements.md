@@ -1,62 +1,94 @@
 # Requirements
 
-## Course context
+## What the assignment asks for
 
-This project is the deliverable for the AGH course requirement *"Aplikacja okienkowa na system GNU/Linux do komunikacji z płytką ESP32"* — a windowed GNU/Linux desktop application that communicates with an ESP32 microcontroller.
+The course brief (prof. Cyganek) is a single sentence:
 
-## Scope
+> Aplikacja okienkowa na system GNU/Linux do komunikacji z płytką ESP32.
 
-`esp32-link` is a desktop application that:
+Translated and unpacked: a windowed application running on GNU/Linux that
+communicates with an ESP32 microcontroller. Beyond that the grading focus is on
+documentation, the architecture, and the design patterns used — the gadget
+itself is mostly a vehicle for those.
 
-- Connects to an ESP32-WROOM-32 board over Wi-Fi using a WebSocket transport.
-- Receives live telemetry from the board and renders it in a real-time chart.
-- Lets the user send commands back to the board (toggle the onboard LED, ping).
+## What I decided to build
 
-The ESP32 acts as a Wi-Fi soft access point. The desktop computer joins that access point as a station and opens a single WebSocket connection.
+A desktop client + firmware pair, connected over a single WebSocket:
+
+- The ESP32-WROOM-32 runs as a Wi-Fi soft access point. It hosts a WebSocket
+  server on `ws://192.168.4.1:81/ws`.
+- The desktop application joins that AP, opens the WebSocket, and renders a
+  live chart of telemetry data from the board.
+- The user can send two commands back: toggle the onboard LED, and a no-op
+  ping that round-trips through the protocol.
+
+Wi-Fi was chosen over USB serial for one practical reason: USB device
+passthrough into WSL2 is a separate adventure I did not want to take on for
+this course. Networking just works.
 
 ## Target environment
 
-| Component | Choice |
-|----------|--------|
-| Operating system | GNU/Linux (developed on Ubuntu under WSL2 with WSLg) |
-| GUI toolkit | Qt 6 via PySide6 |
-| Language (desktop) | Python 3.12 |
-| Dependency manager | `uv` |
-| Microcontroller | ESP32-WROOM-32 (classic ESP32, dual-core 240 MHz, 4 MB flash) |
-| Firmware framework | Arduino-ESP32 under PlatformIO |
-| Wire protocol | Line-delimited JSON over WebSocket |
+| Component | Choice | Why |
+|-----------|--------|-----|
+| Operating system | GNU/Linux (Ubuntu under WSL2 + WSLg) | Required by the brief. WSL gives me a Linux dev environment on a Windows laptop without dual-booting. |
+| GUI toolkit | Qt 6 via PySide6 | Cross-platform, modern, dark theme support, idiomatic signal/slot Observer pattern. |
+| Language (desktop) | Python 3.12 | I'm comfortable in it; full type hints + dataclasses make the domain layer pleasant. |
+| Dependency manager | `uv` | Fast and reproducible. Project-locked via `uv.lock`. |
+| Microcontroller | ESP32-WROOM-32 | Classic ESP32, dual-core 240 MHz, 4 MB flash. The one I had in the drawer. |
+| Firmware framework | Arduino-ESP32 under PlatformIO | Arduino's high-level API + PlatformIO's reproducible builds. |
+| Wire protocol | Line-delimited JSON over WebSocket | Human-readable on the serial monitor, easy to debug with `curl`/Python scripts. |
 
 ## Functional requirements
 
-| ID | Requirement |
-|----|-------------|
-| F1 | Firmware starts a Wi-Fi soft access point on boot. |
-| F2 | Firmware accepts WebSocket clients on `ws://192.168.4.1:81/ws`. |
-| F3 | Firmware broadcasts a telemetry frame every 500 ms to all connected clients. |
-| F4 | Telemetry contains: timestamp (ms since boot), chip temperature (°C), free heap (bytes), and RSSI of the first connected station (dBm). |
-| F5 | Firmware responds to `toggle_led` commands by flipping the onboard LED. |
-| F6 | Firmware responds to `ping` commands with a `pong` acknowledgment. |
-| F7 | Firmware acknowledges every command with an ack frame echoing the command id. |
-| F8 | Desktop application connects to a user-supplied WebSocket URL. |
-| F9 | Desktop application renders telemetry as a real-time chart with a 60-second rolling window. |
-| F10 | Desktop application offers buttons to toggle the LED and send a ping. |
-| F11 | Desktop application persists the last-used URL and window geometry between runs. |
-| F12 | Desktop application automatically reconnects on connection loss using exponential backoff. |
+The firmware must:
+
+- Start a Wi-Fi soft access point on boot and log the bound IP over the serial
+  console at 115200 baud.
+- Accept WebSocket clients on `ws://192.168.4.1:81/ws`.
+- Sample the chip temperature, free heap, and the RSSI of the first connected
+  station every 500 ms and broadcast a `telemetry` frame to every connected
+  client.
+- Skip the broadcast when no clients are connected (no point burning JSON
+  serialisation cycles into the void).
+- Parse incoming `cmd` frames and dispatch by `action`: `toggle_led` flips
+  GPIO 2, `ping` is a no-op. Unknown actions reply with an ack that has
+  `ok: false`.
+- Acknowledge every command with an `ack` frame echoing the original `cmd_id`.
+- Drop malformed JSON and log it; never crash.
+
+The desktop application must:
+
+- Connect to a user-supplied WebSocket URL (pre-filled with the documented
+  default).
+- Render telemetry as a real-time chart with a 60-second rolling window. One
+  plot per signal: temperature, free heap, RSSI.
+- Offer buttons to toggle the LED and send a ping. Buttons disabled when not
+  connected.
+- Persist the last-used URL and the window geometry between runs.
+- Automatically reconnect on connection loss using exponential backoff:
+  1 s, 2 s, 4 s, 8 s, then 8 s indefinitely. User can cancel by clicking
+  Disconnect.
 
 ## Non-functional requirements
 
-| ID | Requirement |
-|----|-------------|
-| N1 | The code matches the documented six design patterns: Facade, Strategy, State, Command, Observer, Singleton. |
-| N2 | The four-layer architecture (UI → application → domain → infrastructure) is enforced; the `domain` layer imports nothing from PySide6 or `websockets`. |
-| N3 | All Python code is fully type-hinted and passes `ruff check` and `ruff format`. |
-| N4 | A unit and integration test suite is provided and runs under `pytest` in continuous integration. |
-| N5 | The project builds in CI: `pio run` for firmware, `uv run pytest` for the desktop app. |
-| N6 | Wire-protocol message types, network constants, and pattern usage are documented in this `docs/` directory and rendered as PlantUML diagrams. |
+- The code uses the six design patterns documented in
+  [03-design.md](03-design.md) (Facade, Strategy, State, Command, Observer,
+  Singleton). They appear in the code as described, not as decorations on a
+  diagram.
+- The application is split into four layers with one-way dependencies
+  (UI → application → domain → infrastructure); the `domain` layer imports
+  nothing from PySide6 or `websockets` and is therefore trivially unit-testable.
+- All Python code has full type hints and passes `ruff check` + `ruff format`.
+- Tests run under `pytest` (38 tests in five files). CI runs them on every
+  push along with a firmware compile check.
+- Wire protocol, network constants, and pattern usage are documented under
+  `docs/` and the UML in `docs/uml/`.
 
 ## Out of scope
 
-- Authentication and encryption (the AP is unsecured beyond the WPA2 passphrase).
-- Multi-board orchestration; the protocol assumes one ESP32.
-- Persistent storage of historical telemetry beyond the in-memory rolling window.
-- Cross-platform GUI testing; only Linux is targeted.
+- Authentication and encryption. The AP uses WPA2 with a hardcoded passphrase
+  and that's the extent of it. This is a course project, not a product.
+- Multi-board orchestration. The protocol assumes one ESP32 client.
+- Persistent storage of historical telemetry beyond the in-memory rolling
+  window.
+- Cross-platform GUI testing. Only Linux is targeted.
